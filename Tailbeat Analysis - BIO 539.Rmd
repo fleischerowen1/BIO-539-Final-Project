@@ -1,0 +1,270 @@
+---
+title: "Tailbeat Analyis"
+author: "Owen Fleischer"
+date: "2026-05-06"
+output: word_document
+---
+# Introduction
+
+To reach an understanding of an animal's ecophysiology, its fine-scale movement parameters, such as quantitative behavioral patterns and rate of energy expenditure, must first be described. In large elasmobranchs and other marine predators with vast horizontal ranges, the necessary data for these descriptions is lacking. Vast libraries of fine-scale movement data across multiple taxa are needed to fill this knowledge gap. 
+
+Tail beat frequency (TBF) is often one of first movement metric that is calculated. TBF allows us to cluster different behavioral states and uncover energy expenditure. In this study, accelerometer-derived TBF from a shortfin mako shark (Isurus oxyrichus) caught and tagged off the coast of RI was examined across different dive stages to investigate how energy expenditure varies throughout shark diving behavior. 
+
+# Research Question
+
+How does a shark's tailbeat frequency vary across dive stages?
+
+# Methods
+
+Before the data are loaded into Rstudio, the raw movement data is transformed into movement metrics such as TBF, tail beat amplitude (TBA), and tailbeat cycle (TBC) in IGOR Pro 9 software. Raw gyroscope data from the animal-bourne accelerometer was subjected to a continous wavelet transformation, outputting TBC and TBA. TBF was determined from the inverse of TBC (1/TBC). 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load Packages 
+```{r}
+library(tidyverse)
+library(diveMove) #this package will allow us to analyze the dive behavior of the fish
+```
+
+## Step 1: Characterize dive behavior across the entire track using the diveMove package
+
+### Load in Data
+```{r}
+accelmako<-read_csv("MAKO1_4_IGOR.csv")
+```
+### Clean up NAs
+```{r}
+accelmako<-accelmako[!is.na(accelmako$Depth),]
+accelmako<-accelmako[!is.na(accelmako$timestamp),]
+```
+
+### Fix timestamp
+```{r}
+accelmako$timestamp<-as.POSIXct(accelmako$timestamp, format="%Y-%m-%d %H:%M:%S", tz= "UTC")
+head(accelmako)
+```
+
+### Find SD, mean, and max depth to determine what we will use for our dive threshold
+```{r}
+sd(accelmako$Depth)
+mean(accelmako$Depth)
+max(accelmako$Depth)
+
+# Since the sd is pretty small compared to the max depth, we will use the mean depth for the dive threshold 
+```
+
+### Create the dive threshold as a value
+```{r}
+"divethreshold"<-(mean(accelmako$Depth, na.rm=TRUE))
+```
+
+### Make a TDR
+```{r}
+makoTDR<-createTDR(accelmako$timestamp, accelmako$Depth, concurrentData = accelmako, speed = FALSE, file="accelmako.csv")
+#TDR is an object created by diveMove that has all necessary data for the package to analyze. Needs Depth, date/time, and a corresponding file.
+```
+
+### Calibrate depth with preset parameters from diveMove
+```{r}
+makocalib<-calibrateDepth(makoTDR, dive.thr = 12.14, zoc.method = "offset", offset=0.001, dive.model="unimodal",descent.crit.q=.2,ascent.crit.q=.2)
+```
+
+### Extract dive metrics with "diveStats
+```{r}
+makoStats<-diveStats(makocalib,depth.deriv = FALSE)
+```
+
+### Split dives into long and short
+```{r}
+makoshortStats<-makoStats[makoStats$divetim<300,]
+makolongStats<-makoStats[makoStats$divetim>300 & makoStats$divetim<=1800,]
+```
+
+### Take a look at a random dive, make sure everything looks okay
+```{r}
+plotTDR(makocalib, diveNo=55)
+```
+
+### Add an "end ascent" column
+```{r}
+makoStats <- makoStats %>% 
+  mutate(endasc = begasc + asctim)
+```
+
+### Add a "beginning bottom time" and an end bottom time" column
+```{r}
+makoStats <- makoStats %>% 
+  mutate(begbottom = enddesc +1)
+makoStats <- makoStats %>% 
+  mutate(endbottom = enddesc + botttim-1)
+```
+
+# Step 2: Assign the different dive stages to the total movement track
+
+### Load in data
+```{r}
+tailbeat <- read_csv("M1.tailbeat.csv") # This CSV came from IGOR Pro 9 software where I used a continuous wavelet transformation to extract tailbeat metrics
+dt <- read_csv("M1.dt.csv") # This CSV contains the depth and temp of every second during the track
+```
+### Perform basic data carpentry
+```{r}
+dt <- dt %>% 
+  drop_na() # Drop all NA's in the depth/temp dataframe
+
+start_time <- as.POSIXct("2021-10-02 09:41:31", tz = "UTC") #Establish a track "start time" - "start time" is found from the timestamp on the video
+```
+
+### Make a new columns to allow for the joining of the trailbeat metric df and the depth/temp df
+```{r}
+dt <- dt %>% 
+  mutate(timestamp = start_time + (row_number() - 1)) # The two data frames have the same timestep but do not share any of the same columns. This timestamp column allows them to be joined
+
+tailbeat <- tailbeat %>% 
+  mutate(timestamp = start_time + (row_number() - 1))
+```
+
+### Join the two dataframes
+```{r}
+total <- left_join(dt, tailbeat, by = "timestamp")
+```
+
+### Make a "dive type" column
+```{r}
+total <- total %>% 
+  mutate(dive_type= NA)
+```
+
+### Make a for loop to classify the different dive types that diveMove found
+```{r}
+total$dive_type[total$Depth >= 0 & total$Depth <= 4] <- "Surface Swimming"
+
+for (i in 1:nrow(makoStats)) {
+  
+  desc_idx <- total$timestamp >= makoStats$begdesc[i] &
+    total$timestamp <= makoStats$enddesc[i]
+  
+  asc_idx <- total$timestamp >= makoStats$begasc[i] &
+    total$timestamp <= makoStats$endasc[i]
+  
+  bottom_idx <- total$timestamp >= makoStats$begbottom[i] &
+    total$timestamp <= makoStats$endbottom[i]
+  
+  total$dive_type[desc_idx] <- "Descending"
+  total$dive_type[asc_idx] <- "Ascending"
+  total$dive_type[bottom_idx] <- "Deep Horizontal"
+}
+```
+
+### Change column names
+```{r}
+total <- total %>% 
+  mutate(TBF = 1/DominantCycle )
+
+total <- total %>% 
+  mutate(logTBC = log(DominantCycle))
+
+total <- total %>% 
+  mutate(logTBA = log(DominantCycleAmplitude))
+
+total <- total %>% 
+  mutate(logTBF = log(TBF))
+
+total <- total %>% 
+  rename(TBA = DominantCycleAmplitude)
+
+total <- total %>% 
+  rename(TBC = DominantCycle)
+```
+
+### Make a new df to investigate how much time was spent in each dive stage
+```{r}
+time_summary <- total %>%
+    group_by(dive_type) %>%
+    summarise(time_spent = n(), .groups = "drop")
+
+time_summary <- time_summary %>% 
+  filter(dive_type != "dive_type")
+```
+
+### Add a proportion column
+```{r}
+time_summary <- time_summary %>%
+  mutate(prop = time_spent / sum(time_spent))    
+```
+
+# Step 3: Visualize data and run statisitical analyses
+
+### Make a plot of the proportion of time spent in each dive stage
+```{r}
+ggplot(time_summary, aes(x = dive_type, y = prop)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Dive Stage", y = "Proportion of Time") +
+  geom_text(aes(label = scales::percent(prop)),
+            vjust = -0.5) +
+  theme_classic()
+```
+### Find the average logTBC over each dive stage. First make a new dataframe
+```{r}
+avg_log_TBC <- total %>% 
+  group_by(dive_type) %>% 
+  summarize(
+    mean_log_tbc = mean(logTBC, na.rm = TRUE),
+    sd_log_tbc = sd(logTBC, na.rm = TRUE),
+    n = n()
+  )
+```
+
+### Remove the NA divetype column
+```{r}
+avg_log_TBC <- avg_log_TBC %>% 
+  filter(dive_type != "dive_type")
+```
+
+### Plot the data
+```{r}
+ggplot(avg_log_TBC, aes(x = dive_type, y = mean_log_tbc)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Dive Stage", y = "Mean LogTBC") +
+  geom_text(aes(label = mean_log_tbc),
+            vjust = -0.5) +
+  theme_classic()
+```
+### Run an ANOVA to see if the TBF is different during different dive stages
+```{r}
+mod1 <- aov(TBF ~ dive_type, data = total)
+
+summary(mod1)
+```
+We see that TBF indeed differs depending on the dive stage
+
+### Run a Tukey's post-hoc test to determine how each dive stage differ from eachother
+```{r}
+tukey_TBC <- TukeyHSD(mod1)
+
+print(tukey_TBC)
+```
+### Make a boxplot to visualize the data
+```{r}
+ggplot(total,
+       aes(x = dive_type,
+           y = TBF,
+           fill = dive_type)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(
+    title = "Tailbeat Frequency Across Dive Stages",
+    x = "Dive Stage",
+    y = "Tailbeat Frequency (Hz)"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+## Step 4: Conclusion
+
+Tailbeat frequency differed significantly among all dive stages (ANOVA with Tukey post-hoc comparisons; p < 0.001 for all pairwise comparisons). Ascending dives exhibited the highest tailbeat frequencies, whereas descending dives showed the lowest values. Surface swimming and deep horizontal swimming displayed intermediate frequencies, suggesting distinct locomotor strategies associated with vertical movement behaviors.

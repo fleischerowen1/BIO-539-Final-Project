@@ -1,0 +1,54 @@
+# Variation in Shark Tailbeat Frequency Across Dive Stages
+
+## Project Overview
+
+This project examines how shark tailbeat frequency (TBF), derived from accelerometer data, varies across different dive stages. The analysis uses statistical comparisons and data visualization techniques in R to investigate behavioral differences in locomotor activity throughout diving behavior.
+
+## Research Question
+
+How does tailbeat frequency vary across different shark dive stages?
+
+## Repository Contents
+
+- `Tailbeat Analyis - BIO 539.Rmd'
+  - Main reproducible analysis file
+
+- "MAKO1_4_IGOR.csv"
+  - 1Hz depth/time dataset that is used to describe different dive stages
+  
+- `M1.tailbeat.csv`
+  - IGOR processed dataset used for analysis  
+  
+- `M1.dt.csv`
+  - 1Hz depth/time dataset that is compatible with M1.tailbeat.csv
+
+## Methods Overview
+
+The analysis includes:
+- Data cleaning and preprocessing
+- Log transformation of movement variables
+- ANOVA and Tukey post-hoc comparisons
+- Visualization: box plots and bar charts
+- Statistical comparisons of tailbeat frequency among dive stages
+
+## Required Packages
+
+The following R packages are required:
+
+diveMove
+tidyverse
+ggplot2
+
+
+## Reproducibility
+
+To reproduce this analysis:
+
+1. Download or clone the repository
+2. Open `shark_tailbeat_analysis.Rmd` in RStudio
+3. Install required packages 
+4. Knit the R Markdown document
+
+## Author
+
+Owen Fleischer
